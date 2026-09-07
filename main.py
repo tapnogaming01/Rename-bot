@@ -5,10 +5,12 @@ import math
 import asyncio
 import zipfile
 import shutil
+import piexif
 from flask import Flask
 from threading import Thread
 from pyrogram import Client, filters
 from pymongo import MongoClient
+from PIL import Image, ImageDraw, ImageFont
 from config import Config
 
 # --- FLASK WEB SERVER FOR RENDER ---
@@ -38,6 +40,52 @@ user_queues = {}
 is_processing = {}
 cancel_requested = {}
 
+# --- WATERMARK & EXIF METADATA HELPER FUNCTION ---
+def process_photo_metadata(image_path, text="Anubhav"):
+    img = Image.open(image_path).convert("RGBA")
+    txt_layer = Image.new("RGBA", img.size, (255, 255, 255, 0))
+    draw = ImageDraw.Draw(txt_layer)
+    
+    width, height = img.size
+    font_size = max(int(height * 0.04), 15)
+
+    try:
+        font = ImageFont.truetype("arial.ttf", font_size)
+    except IOError:
+        font = ImageFont.load_default()
+
+    bbox = draw.textbbox((0, 0), text, font=font)
+    text_width = bbox[2] - bbox[0]
+    text_height = bbox[3] - bbox[1]
+
+    # TOP-LEFT (UPPER CORNER LEFT) POSITIONING
+    margin = int(height * 0.03)
+    x = margin
+    y = margin
+
+    padding = 10
+    draw.rectangle(
+        [x - padding, y - padding, x + text_width + padding, y + text_height + padding],
+        fill=(0, 0, 0, 140)
+    )
+    draw.text((x, y), text, fill=(255, 255, 255, 255), font=font)
+
+    watermarked_img = Image.alpha_composite(img, txt_layer).convert("RGB")
+    
+    base_name = os.path.splitext(os.path.basename(image_path))[0]
+    output_path = f"wm_{base_name}.jpg"
+
+    # Set EXIF Metadata Tags inside JPEG File
+    zeroth_ifd = {
+        piexif.ImageIFD.Artist: text.encode('utf-8'),
+        piexif.ImageIFD.ImageDescription: text.encode('utf-8'),
+        piexif.ImageIFD.Copyright: text.encode('utf-8')
+    }
+    exif_bytes = piexif.dump({"0th": zeroth_ifd})
+
+    watermarked_img.save(output_path, "JPEG", quality=95, exif=exif_bytes)
+    return output_path
+
 # --- PROGRESS BAR FUNCTION ---
 async def progress_bar(current, total, status_msg, start_time, action_type):
     now = time.time()
@@ -66,18 +114,53 @@ async def progress_bar(current, total, status_msg, start_time, action_type):
 @app.on_message(filters.command("start"))
 async def start(client, message):
     await message.reply_text(
-        "👋 **Welcome to Advance Audio Rename & Batch Bot!**\n\n"
+        "👋 **Welcome to Advance Audio & Photo Bot!**\n\n"
         "**Features:**\n"
         "• Single File Rename (`Filename | Artist`)\n"
         "• Batch Processing (`/batch Filename Ep 1 | Artist`)\n"
         "• Range Batch Processing (`/batch Filename Ep 1 TO 10 | Artist`)\n"
-        "• Zip File Extraction (`/extract Filename Ep 1 | Artist`)\n"
+        "• Zip Extraction (`/extract Filename Ep 1 | Artist`)\n"
+        "• Photo Tag & EXIF Watermark (`/photo TagName` - Reply to Photo)\n"
         "• Cancel Process (`/cancel`)\n\n"
         "**Thumbnail Commands:**\n"
         "• `/savethumb` (Reply to photo) | `/showthumb` | `/delthumb`\n\n"
         "**Caption Commands:**\n"
         "• `/setcaption <text>` | `/delcaption`"
     )
+
+# --- PHOTO WATERMARK & METADATA HANDLER ---
+@app.on_message(filters.command("photo"))
+async def photo_watermark(client, message):
+    replied = message.reply_to_message
+    if not (replied and (replied.photo or (replied.document and replied.document.mime_type and replied.document.mime_type.startswith("image/")))):
+        await message.reply_text("⚠️ Kripya kisi Photo par reply karke `/photo TagName` bhejein.")
+        return
+
+    args = message.text.split(None, 1)
+    tag_text = args[1].strip() if len(args) > 1 else "Anubhav"
+
+    status_msg = await message.reply_text("🖼️ Photo mein tag & EXIF metadata add ho raha hai...")
+
+    downloaded_path = await client.download_media(replied)
+
+    try:
+        wm_image_path = process_photo_metadata(downloaded_path, text=tag_text)
+
+        await status_msg.edit_text("⬆️ Uploading photo...")
+        await client.send_photo(
+            chat_id=message.chat.id,
+            photo=wm_image_path,
+            caption=f"✅ **Tag & EXIF Metadata Added:** `{tag_text}`"
+        )
+        await status_msg.delete()
+
+    except Exception as e:
+        await status_msg.edit_text(f"❌ Error: `{str(e)}`")
+
+    if os.path.exists(downloaded_path):
+        os.remove(downloaded_path)
+    if 'wm_image_path' in locals() and os.path.exists(wm_image_path):
+        os.remove(wm_image_path)
 
 # Thumbnail Commands
 @app.on_message(filters.command("savethumb") & filters.reply)
@@ -184,7 +267,6 @@ async def process_batch(client, message):
 
     raw_input = args[1].strip()
     
-    # Extract Artist Name if provided via '|'
     if "|" in raw_input:
         text_arg, artist_name = [p.strip() for p in raw_input.split("|", 1)]
     else:
@@ -362,7 +444,7 @@ async def process_zip(client, message):
     del user_files[chat_id]
 
 # --- SINGLE AUDIO RENAME HANDLER WITH ARTIST SUPPORT ---
-@app.on_message(filters.text & ~filters.command(["start", "savethumb", "showthumb", "delthumb", "setcaption", "delcaption", "clear", "batch", "extract", "cancel"]))
+@app.on_message(filters.text & ~filters.command(["start", "savethumb", "showthumb", "delthumb", "setcaption", "delcaption", "clear", "batch", "extract", "photo", "cancel"]))
 async def single_rename(client, message):
     chat_id = message.chat.id
     user_id = message.from_user.id
