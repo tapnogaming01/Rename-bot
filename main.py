@@ -268,7 +268,7 @@ async def photo_watermark(client, message):
     if 'wm_image_path' in locals() and os.path.exists(wm_image_path):
         os.remove(wm_image_path)
 
-# --- CLEAN FILE RECEIVER (NO SPAM MESSAGES) ---
+# --- CLEAN FILE RECEIVER (EDIT SINGLE MESSAGE ONLY) ---
 @app.on_message(filters.audio | filters.document)
 async def handle_files(client, message):
     chat_id = message.chat.id
@@ -290,20 +290,20 @@ async def handle_files(client, message):
             [InlineKeyboardButton("📜 Commands Menu", callback_data="menu_commands"), InlineKeyboardButton("🗑️ Clear Queue", callback_data="btn_clear")]
         ])
 
+        status_text = f"📥 **Total Files Received:** `{total_count}`\n\nCommand bhejein: `/batch Title Ep 1 | Artist`"
+
+        # Agar pehle se status message exist karta hai to usko edit karenge
         if chat_id in queue_messages:
             try:
-                await queue_messages[chat_id].edit_text(
-                    f"📥 **Total Files Received:** `{total_count}`\n\nCommand bhejein: `/batch Title Ep 1 | Artist`",
-                    reply_markup=inline_btn
-                )
+                await queue_messages[chat_id].edit_text(status_text, reply_markup=inline_btn)
+                return
             except Exception:
+                # Agar purana message user ne delete kar diya ho to naya bhej kar update kar lenge
                 pass
-        else:
-            msg = await message.reply_text(
-                f"📥 **Total Files Received:** `{total_count}`\n\nCommand bhejein: `/batch Title Ep 1 | Artist`",
-                reply_markup=inline_btn
-            )
-            queue_messages[chat_id] = msg
+
+        # Pehli baar me naya message bhej kar dictionary me store kar lenge
+        msg = await message.reply_text(status_text, reply_markup=inline_btn)
+        queue_messages[chat_id] = msg
 
 # --- BATCH PROCESS HANDLER ---
 @app.on_message(filters.command("batch"))
