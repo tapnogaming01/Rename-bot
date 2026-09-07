@@ -36,7 +36,7 @@ app = Client("advance_audio_bot", api_id=Config.API_ID, api_hash=Config.API_HASH
 user_files = {}
 user_queues = {}
 is_processing = {}
-cancel_requested = {}  # Track process cancellation state
+cancel_requested = {}
 
 # --- PROGRESS BAR FUNCTION ---
 async def progress_bar(current, total, status_msg, start_time, action_type):
@@ -68,10 +68,10 @@ async def start(client, message):
     await message.reply_text(
         "👋 **Welcome to Advance Audio Rename & Batch Bot!**\n\n"
         "**Features:**\n"
-        "• Single File Rename (`LSOTMK EP 1 TO 10 | Artist Name`)\n"
-        "• Single Episode Batch (`/batch LSOTMK EP 1`)\n"
-        "• Range Episode Batch (`/batch LSOTMK EP 1 TO 10`)\n"
-        "• Zip File Extraction (`/extract My Process Ep 1`)\n"
+        "• Single File Rename (`Filename | Artist`)\n"
+        "• Batch Processing (`/batch Filename Ep 1 | Artist`)\n"
+        "• Range Batch Processing (`/batch Filename Ep 1 TO 10 | Artist`)\n"
+        "• Zip File Extraction (`/extract Filename Ep 1 | Artist`)\n"
         "• Cancel Process (`/cancel`)\n\n"
         "**Thumbnail Commands:**\n"
         "• `/savethumb` (Reply to photo) | `/showthumb` | `/delthumb`\n\n"
@@ -129,15 +129,15 @@ async def clear_queue(client, message):
     user_queues[chat_id] = []
     await message.reply_text("🗑️ Queue clear kar di gayi hai.")
 
-# --- CANCEL COMMAND HANDLER ---
+# Cancel Command
 @app.on_message(filters.command("cancel"))
 async def cancel_process(client, message):
     chat_id = message.chat.id
     if is_processing.get(chat_id, False):
         cancel_requested[chat_id] = True
-        await message.reply_text("🛑 Process cancel ho raha hai... Kripya thoda wait karein.")
+        await message.reply_text("🛑 Process cancel ho raha hai...")
     else:
-        await message.reply_text("⚠️ Koi bhi active process chal nahi raha hai.")
+        await message.reply_text("⚠️ Koi active process nahi chal raha.")
 
 # --- FILE RECEIVER ---
 @app.on_message(filters.audio | filters.document)
@@ -146,7 +146,7 @@ async def handle_files(client, message):
     
     if message.document and message.document.file_name and message.document.file_name.endswith(('.zip', '.rar')):
         user_files[chat_id] = message
-        await message.reply_text("📦 **Zip File Detected!**\nExtract ke liye send karein:\n👉 `/extract My Process Ep 1`")
+        await message.reply_text("📦 **Zip File Detected!**\nExtract command:\n👉 `/extract LSOTMK EP 1 | Artist Name`")
         return
 
     is_audio = message.audio or (message.document and message.document.mime_type and message.document.mime_type.startswith("audio/"))
@@ -157,13 +157,13 @@ async def handle_files(client, message):
         
         await message.reply_text(
             f"📥 File Queue me add hui (`Total: {len(user_queues[chat_id])}`).\n\n"
-            "• **Single Ep Batch:** `/batch LSOTMK EP 1`\n"
-            "• **Range Ep Batch:** `/batch LSOTMK EP 1 TO 10`"
+            "• **Batch:** `/batch LSOTMK EP 1 | Artist Name`\n"
+            "• **Range Batch:** `/batch LSOTMK EP 1 TO 10 | Artist Name`"
         )
     else:
         await message.reply_text("❌ Kripya Audio ya Zip file bhejein.")
 
-# --- DUAL-MODE BATCH HANDLER WITH CANCEL SUPPORT ---
+# --- BATCH HANDLER WITH ARTIST SUPPORT ---
 @app.on_message(filters.command("batch"))
 async def process_batch(client, message):
     chat_id = message.chat.id
@@ -179,11 +179,18 @@ async def process_batch(client, message):
 
     args = message.text.split(None, 1)
     if len(args) < 2:
-        await message.reply_text("⚠️ **Examples:**\n• `/batch LSOTMK EP 1` (Single Episode sequence)\n• `/batch LSOTMK EP 1 TO 10` (Auto Range tag)")
+        await message.reply_text("⚠️ **Format:** `/batch LSOTMK EP 1 | Artist Name`")
         return
 
-    text_arg = args[1].strip()
+    raw_input = args[1].strip()
     
+    # Extract Artist Name if provided via '|'
+    if "|" in raw_input:
+        text_arg, artist_name = [p.strip() for p in raw_input.split("|", 1)]
+    else:
+        text_arg = raw_input
+        artist_name = "Unknown Artist"
+
     range_match = re.search(r'^(.*?)\s*(\d+)\s*(?:TO|-)\s*(\d+)$', text_arg, re.IGNORECASE)
     single_match = re.search(r'^(.*?)\s*(\d+)$', text_arg) if not range_match else None
 
@@ -215,7 +222,6 @@ async def process_batch(client, message):
     total_files = len(files_to_process)
     
     for index, msg in enumerate(files_to_process):
-        # Cancel Check
         if cancel_requested.get(chat_id, False):
             await status_msg.edit_text("🚫 **Batch Process Cancel Kar Diya Gaya!**")
             break
@@ -229,6 +235,7 @@ async def process_batch(client, message):
             new_filename = f"{base_name} {current_ep}.mp3"
 
         clean_title = os.path.splitext(new_filename)[0]
+        caption_text = user_data.get("caption", f"🎵 **Title:** `{clean_title}`\n👤 **Artist:** `{artist_name}`") if user_data else f"🎵 **Title:** `{clean_title}`\n👤 **Artist:** `{artist_name}`"
 
         start_time = time.time()
         file_path = await msg.download(
@@ -237,7 +244,6 @@ async def process_batch(client, message):
             progress_args=(status_msg, start_time, f"⬇️ Down ({index+1}/{total_files})")
         )
 
-        # Download hone ke baad second cancel check
         if cancel_requested.get(chat_id, False):
             if os.path.exists(file_path):
                 os.remove(file_path)
@@ -251,7 +257,8 @@ async def process_batch(client, message):
             thumb=thumb_path,
             file_name=new_filename,
             title=clean_title,
-            caption=f"✅ **File:** `{new_filename}`",
+            performer=artist_name,
+            caption=caption_text,
             progress=progress_bar,
             progress_args=(status_msg, start_time, f"⬆️ Up ({index+1}/{total_files})")
         )
@@ -266,10 +273,10 @@ async def process_batch(client, message):
 
     is_processing[chat_id] = False
     if not cancel_requested.get(chat_id, False):
-        await status_msg.edit_text(f"🎉 Sabhi `{total_files}` files batch me process ho gayi!")
+        await status_msg.edit_text(f"🎉 Sabhi `{total_files}` files process ho gayi!")
     cancel_requested[chat_id] = False
 
-# --- ZIP EXTRACT HANDLER WITH CANCEL SUPPORT ---
+# --- ZIP EXTRACT HANDLER WITH ARTIST SUPPORT ---
 @app.on_message(filters.command("extract"))
 async def process_zip(client, message):
     chat_id = message.chat.id
@@ -279,7 +286,14 @@ async def process_zip(client, message):
         await message.reply_text("⚠️ Pehle `.zip` file bhejein!")
         return
 
-    text_arg = message.text.split(None, 1)[1].strip() if len(message.command) > 1 else "Episode 1"
+    raw_input = message.text.split(None, 1)[1].strip() if len(message.command) > 1 else "Episode 1"
+    
+    if "|" in raw_input:
+        text_arg, artist_name = [p.strip() for p in raw_input.split("|", 1)]
+    else:
+        text_arg = raw_input
+        artist_name = "Unknown Artist"
+
     match = re.search(r'^(.*?)\s*(\d+)$', text_arg)
     custom_prefix = match.group(1).strip() if match else text_arg
     start_num = int(match.group(2)) if match else 1
@@ -315,6 +329,7 @@ async def process_zip(client, message):
 
             new_filename = f"{custom_prefix} {count}.mp3"
             clean_title = os.path.splitext(new_filename)[0]
+            caption_text = user_data.get("caption", f"🎵 **Title:** `{clean_title}`\n👤 **Artist:** `{artist_name}`") if user_data else f"🎵 **Title:** `{clean_title}`\n👤 **Artist:** `{artist_name}`"
 
             await status_msg.edit_text(f"⏳ Uploading Extracted: `{new_filename}`\n❌ Stop karne ke liye `/cancel` send karein.")
             await client.send_audio(
@@ -323,7 +338,8 @@ async def process_zip(client, message):
                 thumb=thumb_path,
                 file_name=new_filename,
                 title=clean_title,
-                caption=f"✅ **Extracted Audio:** `{new_filename}`"
+                performer=artist_name,
+                caption=caption_text
             )
             count += 1
             await asyncio.sleep(1)
@@ -345,7 +361,7 @@ async def process_zip(client, message):
     cancel_requested[chat_id] = False
     del user_files[chat_id]
 
-# --- SINGLE AUDIO RENAME HANDLER ---
+# --- SINGLE AUDIO RENAME HANDLER WITH ARTIST SUPPORT ---
 @app.on_message(filters.text & ~filters.command(["start", "savethumb", "showthumb", "delthumb", "setcaption", "delcaption", "clear", "batch", "extract", "cancel"]))
 async def single_rename(client, message):
     chat_id = message.chat.id
@@ -416,5 +432,5 @@ async def single_rename(client, message):
     del user_files[chat_id]
 
 if __name__ == "__main__":
-    keep_alive()  # Flask server thread start karega
-    app.run()     # Telegram Pyrogram Bot run karega
+    keep_alive()
+    app.run()
