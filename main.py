@@ -124,8 +124,9 @@ def get_commands_menu():
         [InlineKeyboardButton("🔙 Back to Main Menu", callback_data="menu_main")]
     ])
 
-def get_back_button():
+def get_developer_menu():
     return InlineKeyboardMarkup([
+        [InlineKeyboardButton("👨‍💻 Contact Developer (Anubhav)", url="https://t.me/kcxry")],
         [InlineKeyboardButton("🔙 Back to Main Menu", callback_data="menu_main")]
     ])
 
@@ -170,13 +171,13 @@ async def cb_handler(client, query: CallbackQuery):
     elif data == "menu_developer":
         dev_text = (
             "👨‍💻 **Developer Details & Bot Info:**\n\n"
-            "👤 **Developer:** Anubhav\n"
+            "👤 **Developer:** [Anubhav](https://t.me/kcxry)\n"
             "🤖 **Bot Version:** v2.5 Advance\n"
             "⚡ **Framework:** Pyrogram + Python 3.10\n"
             "🌐 **Database:** MongoDB Atlas\n\n"
             "💡 *Aap is bot se High-Quality audio renaming, zip extract, custom caption, aur 100% clean photo watermarking kar sakte hain.*"
         )
-        await query.message.edit_text(dev_text, reply_markup=get_back_button())
+        await query.message.edit_text(dev_text, reply_markup=get_developer_menu(), disable_web_page_preview=True)
 
     # DIRECT COMMAND RUNNERS VIA INLINE BUTTONS
     elif data == "cmd_photo":
