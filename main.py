@@ -49,7 +49,7 @@ def process_photo_metadata(image_path, text="Anubhav"):
     width, height = img.size
     
     # Font Size ko 4% se bada karke 7% kar diya gaya hai (minimum 25px)
-    font_size = max(int(height * 0.07), 25)
+    font_size = max(int(height * 0.15), 75)
 
     try:
         font = ImageFont.truetype("arial.ttf", font_size)
@@ -61,7 +61,7 @@ def process_photo_metadata(image_path, text="Anubhav"):
     text_height = bbox[3] - bbox[1]
 
     # TOP-LEFT POSITIONING (Adjusted margin and padding)
-    margin = int(height * 0.04)
+    margin = int(height * 0.06)
     x = margin
     y = margin
     padding = int(font_size * 0.25)
@@ -69,7 +69,7 @@ def process_photo_metadata(image_path, text="Anubhav"):
     # Black Background Box for visual contrast
     draw.rectangle(
         [x - padding, y - padding, x + text_width + padding, y + text_height + padding],
-        fill=(0, 0, 0, 160)
+        fill=(0, 0, 0, 200)
     )
     draw.text((x, y), text, fill=(255, 255, 255, 255), font=font)
 
