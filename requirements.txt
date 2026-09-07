@@ -4,3 +4,5 @@ pymongo
 flask
 Pillow
 piexif
+gunicorn
+dnspython
