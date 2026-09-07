@@ -66,8 +66,9 @@ async def start(client, message):
     await message.reply_text(
         "👋 **Welcome to Advance Audio Rename & Batch Bot!**\n\n"
         "**Features:**\n"
-        "• Single File Rename with Custom Artist (`Filename.mp3 | Artist Name`)\n"
-        "• Auto Range Batch Processing (`/batch LSOTMK EP 1 TO 10`)\n"
+        "• Single File Rename (`LSOTMK EP 1 TO 10 | Artist Name`)\n"
+        "• Single Episode Batch (`/batch LSOTMK EP 1`)\n"
+        "• Range Episode Batch (`/batch LSOTMK EP 1 TO 10`)\n"
         "• Zip File Extraction (`/extract My Process Ep 1`)\n\n"
         "**Thumbnail Commands:**\n"
         "• `/savethumb` (Reply to photo) | `/showthumb` | `/delthumb`\n\n"
@@ -143,13 +144,13 @@ async def handle_files(client, message):
         
         await message.reply_text(
             f"📥 File Queue me add hui (`Total: {len(user_queues[chat_id])}`).\n\n"
-            "• **Single Rename:** `LSOTMK EP 1 TO 20.mp3 | अनुभव चौधरी` text send karein.\n"
-            "• **Batch Process:** `/batch LSOTMK EP 1 TO 10` send karein."
+            "• **Single Ep Batch:** `/batch LSOTMK EP 1`\n"
+            "• **Range Ep Batch:** `/batch LSOTMK EP 1 TO 10`"
         )
     else:
         await message.reply_text("❌ Kripya Audio ya Zip file bhejein.")
 
-# --- BATCH RENAME HANDLER (AUTO SEQUENTIAL RANGE UPDATE) ---
+# --- DUAL-MODE BATCH HANDLER (SINGLE EP & RANGE BOTH) ---
 @app.on_message(filters.command("batch"))
 async def process_batch(client, message):
     chat_id = message.chat.id
@@ -165,23 +166,31 @@ async def process_batch(client, message):
 
     args = message.text.split(None, 1)
     if len(args) < 2:
-        await message.reply_text("⚠️ **Format:** `/batch LSOTMK EP 1 TO 10`")
+        await message.reply_text("⚠️ **Examples:**\n• `/batch LSOTMK EP 1` (Single Episode sequence)\n• `/batch LSOTMK EP 1 TO 10` (Auto Range tag)")
         return
 
     text_arg = args[1].strip()
     
-    # Range check kar rahe hain (e.g. '1 TO 10')
+    # 1. Range Mode Detection (e.g., '1 TO 10')
     range_match = re.search(r'^(.*?)\s*(\d+)\s*(?:TO|-)\s*(\d+)$', text_arg, re.IGNORECASE)
+    
+    # 2. Single Episode Mode Detection (e.g., 'LSOTMK EP 1')
+    single_match = re.search(r'^(.*?)\s*(\d+)$', text_arg) if not range_match else None
 
     if range_match:
+        mode = "RANGE"
         base_name = range_match.group(1).strip()
         start_num = int(range_match.group(2))
         end_num = int(range_match.group(3))
-        step = (end_num - start_num) + 1  # Range size calculation (10)
+        step = (end_num - start_num) + 1
+    elif single_match:
+        mode = "SINGLE"
+        base_name = single_match.group(1).strip()
+        start_num = int(single_match.group(2))
     else:
+        mode = "SINGLE"
         base_name = text_arg
         start_num = 1
-        step = 10
 
     files_to_process = user_queues[chat_id].copy()
     user_queues[chat_id] = []
@@ -189,19 +198,20 @@ async def process_batch(client, message):
 
     status_msg = await message.reply_text(f"🔄 Batch process shuru ho raha hai (`Total: {len(files_to_process)}` files)...")
 
-    # Mongo se Thumbnail check
     user_data = users_db.find_one({"user_id": user_id})
     thumb_path = await client.download_media(user_data["thumb"], file_name=f"temp_thumb_{user_id}.jpg") if user_data and user_data.get("thumb") else None
 
     total_files = len(files_to_process)
     
     for index, msg in enumerate(files_to_process):
-        # Har single file ke liye range aage auto increment hogi
-        curr_start = start_num + (index * step)
-        curr_end = curr_start + step - 1
+        if mode == "RANGE":
+            curr_start = start_num + (index * step)
+            curr_end = curr_start + step - 1
+            new_filename = f"{base_name} {curr_start} TO {curr_end}.mp3"
+        else:  # SINGLE EPISODE MODE
+            current_ep = start_num + index
+            new_filename = f"{base_name} {current_ep}.mp3"
 
-        range_tag = f"{curr_start} TO {curr_end}"
-        new_filename = f"{base_name} {range_tag}.mp3"
         clean_title = os.path.splitext(new_filename)[0]
 
         start_time = time.time()
@@ -232,7 +242,7 @@ async def process_batch(client, message):
         os.remove(thumb_path)
 
     is_processing[chat_id] = False
-    await status_msg.edit_text(f"🎉 Sabhi `{total_files}` files auto range update ke sath rename ho gayi!")
+    await status_msg.edit_text(f"🎉 Sabhi `{total_files}` files batch me process ho gayi!")
 
 # --- ZIP EXTRACT HANDLER ---
 @app.on_message(filters.command("extract"))
@@ -298,7 +308,7 @@ async def process_zip(client, message):
         shutil.rmtree(extract_dir)
     del user_files[chat_id]
 
-# --- SINGLE AUDIO RENAME WITH ARTIST HANDLER ---
+# --- SINGLE AUDIO RENAME HANDLER ---
 @app.on_message(filters.text & ~filters.command(["start", "savethumb", "showthumb", "delthumb", "setcaption", "delcaption", "clear", "batch", "extract"]))
 async def single_rename(client, message):
     chat_id = message.chat.id
@@ -313,14 +323,21 @@ async def single_rename(client, message):
 
     if "|" in text_input:
         parts = text_input.split("|", 1)
-        new_filename = parts[0].strip()
+        raw_name = parts[0].strip()
         artist_name = parts[1].strip()
     else:
-        new_filename = text_input
+        raw_name = text_input
         artist_name = "Unknown Artist"
 
-    if not (new_filename.endswith(".mp3") or new_filename.endswith(".m4a")):
-        new_filename += ".mp3"
+    range_match = re.search(r'^(.*?)\s*(\d+)\s*(?:TO|-)\s*(\d+)$', raw_name, re.IGNORECASE)
+    
+    if range_match:
+        base_name = range_match.group(1).strip()
+        start_num = range_match.group(2)
+        end_num = range_match.group(3)
+        new_filename = f"{base_name} {start_num} TO {end_num}.mp3"
+    else:
+        new_filename = raw_name if (raw_name.endswith(".mp3") or raw_name.endswith(".m4a")) else f"{raw_name}.mp3"
 
     clean_title = os.path.splitext(new_filename)[0]
     status_msg = await message.reply_text("⬇️ Processing Audio...")
