@@ -1,0 +1,8 @@
+pyrogram
+tgcrypto
+Pillow
+pymongo
+dnspython
+flask
+gunicorn
+
