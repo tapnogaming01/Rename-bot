@@ -67,7 +67,7 @@ async def start(client, message):
         "👋 **Welcome to Advance Audio Rename & Batch Bot!**\n\n"
         "**Features:**\n"
         "• Single File Rename with Custom Artist (`Filename.mp3 | Artist Name`)\n"
-        "• Batch Audio Processing (`/batch My Process Ep 1`)\n"
+        "• Auto Range Batch Processing (`/batch LSOTMK EP 1 TO 10`)\n"
         "• Zip File Extraction (`/extract My Process Ep 1`)\n\n"
         "**Thumbnail Commands:**\n"
         "• `/savethumb` (Reply to photo) | `/showthumb` | `/delthumb`\n\n"
@@ -144,12 +144,12 @@ async def handle_files(client, message):
         await message.reply_text(
             f"📥 File Queue me add hui (`Total: {len(user_queues[chat_id])}`).\n\n"
             "• **Single Rename:** `LSOTMK EP 1 TO 20.mp3 | अनुभव चौधरी` text send karein.\n"
-            "• **Batch Process:** `/batch My Process Ep 1` send karein."
+            "• **Batch Process:** `/batch LSOTMK EP 1 TO 10` send karein."
         )
     else:
         await message.reply_text("❌ Kripya Audio ya Zip file bhejein.")
 
-# --- BATCH RENAME HANDLER ---
+# --- BATCH RENAME HANDLER (AUTO SEQUENTIAL RANGE UPDATE) ---
 @app.on_message(filters.command("batch"))
 async def process_batch(client, message):
     chat_id = message.chat.id
@@ -164,37 +164,51 @@ async def process_batch(client, message):
         return
 
     args = message.text.split(None, 1)
-    custom_prefix = None
-    start_num = 1
+    if len(args) < 2:
+        await message.reply_text("⚠️ **Format:** `/batch LSOTMK EP 1 TO 10`")
+        return
 
-    if len(args) > 1:
-        text_arg = args[1].strip()
-        match = re.search(r'^(.*?)\s*(\d+)$', text_arg)
-        if match:
-            custom_prefix = match.group(1).strip()
-            start_num = int(match.group(2))
-        else:
-            custom_prefix = text_arg
+    text_arg = args[1].strip()
+    
+    # Range check kar rahe hain (e.g. '1 TO 10')
+    range_match = re.search(r'^(.*?)\s*(\d+)\s*(?:TO|-)\s*(\d+)$', text_arg, re.IGNORECASE)
+
+    if range_match:
+        base_name = range_match.group(1).strip()
+        start_num = int(range_match.group(2))
+        end_num = int(range_match.group(3))
+        step = (end_num - start_num) + 1  # Range size calculation (10)
+    else:
+        base_name = text_arg
+        start_num = 1
+        step = 10
 
     files_to_process = user_queues[chat_id].copy()
     user_queues[chat_id] = []
     is_processing[chat_id] = True
 
-    status_msg = await message.reply_text(f"🔄 Batch process shuru ho raha hai (`{len(files_to_process)}` files)...")
+    status_msg = await message.reply_text(f"🔄 Batch process shuru ho raha hai (`Total: {len(files_to_process)}` files)...")
 
+    # Mongo se Thumbnail check
     user_data = users_db.find_one({"user_id": user_id})
     thumb_path = await client.download_media(user_data["thumb"], file_name=f"temp_thumb_{user_id}.jpg") if user_data and user_data.get("thumb") else None
 
-    count = start_num
-    for msg in files_to_process:
-        new_filename = f"{custom_prefix} {count}.mp3" if custom_prefix else f"Audio_{count}.mp3"
+    total_files = len(files_to_process)
+    
+    for index, msg in enumerate(files_to_process):
+        # Har single file ke liye range aage auto increment hogi
+        curr_start = start_num + (index * step)
+        curr_end = curr_start + step - 1
+
+        range_tag = f"{curr_start} TO {curr_end}"
+        new_filename = f"{base_name} {range_tag}.mp3"
         clean_title = os.path.splitext(new_filename)[0]
 
         start_time = time.time()
         file_path = await msg.download(
             file_name=new_filename,
             progress=progress_bar,
-            progress_args=(status_msg, start_time, f"⬇️ Down ({count}/{len(files_to_process)})")
+            progress_args=(status_msg, start_time, f"⬇️ Down ({index+1}/{total_files})")
         )
 
         start_time = time.time()
@@ -204,21 +218,21 @@ async def process_batch(client, message):
             thumb=thumb_path,
             file_name=new_filename,
             title=clean_title,
-            caption=f"✅ **Batch File:** `{new_filename}`",
+            caption=f"✅ **File:** `{new_filename}`",
             progress=progress_bar,
-            progress_args=(status_msg, start_time, f"⬆️ Up ({count}/{len(files_to_process)})")
+            progress_args=(status_msg, start_time, f"⬆️ Up ({index+1}/{total_files})")
         )
 
         if os.path.exists(file_path):
             os.remove(file_path)
-        count += 1
+            
         await asyncio.sleep(1)
 
     if thumb_path and os.path.exists(thumb_path):
         os.remove(thumb_path)
 
     is_processing[chat_id] = False
-    await status_msg.edit_text("🎉 Sabhi files batch me upload ho gayi!")
+    await status_msg.edit_text(f"🎉 Sabhi `{total_files}` files auto range update ke sath rename ho gayi!")
 
 # --- ZIP EXTRACT HANDLER ---
 @app.on_message(filters.command("extract"))
