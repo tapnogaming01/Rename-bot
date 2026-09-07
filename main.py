@@ -40,14 +40,16 @@ user_queues = {}
 is_processing = {}
 cancel_requested = {}
 
-# --- WATERMARK & EXIF METADATA HELPER FUNCTION ---
+# --- WATERMARK & EXIF METADATA HELPER FUNCTION (UPDATED SIZE) ---
 def process_photo_metadata(image_path, text="Anubhav"):
     img = Image.open(image_path).convert("RGBA")
     txt_layer = Image.new("RGBA", img.size, (255, 255, 255, 0))
     draw = ImageDraw.Draw(txt_layer)
     
     width, height = img.size
-    font_size = max(int(height * 0.04), 15)
+    
+    # Font Size ko 4% se bada karke 7% kar diya gaya hai (minimum 25px)
+    font_size = max(int(height * 0.07), 25)
 
     try:
         font = ImageFont.truetype("arial.ttf", font_size)
@@ -58,15 +60,16 @@ def process_photo_metadata(image_path, text="Anubhav"):
     text_width = bbox[2] - bbox[0]
     text_height = bbox[3] - bbox[1]
 
-    # TOP-LEFT (UPPER CORNER LEFT) POSITIONING
-    margin = int(height * 0.03)
+    # TOP-LEFT POSITIONING (Adjusted margin and padding)
+    margin = int(height * 0.04)
     x = margin
     y = margin
+    padding = int(font_size * 0.25)
 
-    padding = 10
+    # Black Background Box for visual contrast
     draw.rectangle(
         [x - padding, y - padding, x + text_width + padding, y + text_height + padding],
-        fill=(0, 0, 0, 140)
+        fill=(0, 0, 0, 160)
     )
     draw.text((x, y), text, fill=(255, 255, 255, 255), font=font)
 
